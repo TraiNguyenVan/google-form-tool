@@ -44,6 +44,16 @@
   const statFilled = $('#statFilled');
   const clearMappingsBtn = $('#clearMappingsBtn');
 
+  // Import Data
+  const importTextInput = $('#importTextInput');
+  const importTextBtn = $('#importTextBtn');
+  const reviewImportModal = $('#reviewImportModal');
+  const importLoadingState = $('#importLoadingState');
+  const importReviewList = $('#importReviewList');
+  const importActions = $('#importActions');
+  const cancelImportBtn = $('#cancelImportBtn');
+  const saveImportBtn = $('#saveImportBtn');
+
   // Modals
   const newProfileModal = $('#newProfileModal');
   const newProfileName = $('#newProfileName');
@@ -61,6 +71,7 @@
   let profiles = [];
   let activeProfileId = null;
   let profileFields = []; // Fields for legacy profiles
+  let currentImportedFields = []; // For natural language import
 
   // ─── Init ───
   async function init() {
@@ -80,6 +91,21 @@
         if (changeInfo.url || changeInfo.status === 'complete') checkActiveTab();
       });
     }
+
+    // Check for pending import text from background script
+    const data = await chrome.storage.local.get(['pendingImportText']);
+    if (data.pendingImportText) {
+      await chrome.storage.local.remove('pendingImportText');
+      handleImportText(data.pendingImportText);
+    }
+
+    // Listen for storage changes if side panel is already open when context menu is clicked
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.pendingImportText && changes.pendingImportText.newValue) {
+        chrome.storage.local.remove('pendingImportText');
+        handleImportText(changes.pendingImportText.newValue);
+      }
+    });
   }
 
   // ─── Tab Navigation ───
@@ -231,6 +257,122 @@
     statMappings.textContent = stats.learnedMappings;
     statFilled.textContent = stats.filledFields;
     $('#mappingCount').textContent = stats.learnedMappings;
+  }
+
+  // ─── Import Text Flow ───
+
+  async function handleImportText(text) {
+    if (!text || !text.trim()) return;
+    
+    switchTab('mydata');
+    
+    const apiKey = await Knowledge.getApiKey();
+    if (!apiKey) {
+      showToast('API key required for Natural Language Import', 'error');
+      return;
+    }
+
+    reviewImportModal.style.display = 'flex';
+    importLoadingState.style.display = 'flex';
+    importReviewList.style.display = 'none';
+    importActions.style.display = 'none';
+
+    try {
+      const availableFields = await Knowledge.getAvailableFields();
+      currentImportedFields = await AI.extractKnowledgeFromText(text, availableFields, apiKey);
+      
+      if (currentImportedFields.length === 0) {
+        reviewImportModal.style.display = 'none';
+        showToast('No personal data found in text', 'info');
+        return;
+      }
+      
+      await renderImportReview(currentImportedFields);
+      
+    } catch (err) {
+      console.error('[FormFill Pro] Import error:', err);
+      reviewImportModal.style.display = 'none';
+      showToast(err.message || 'Import failed', 'error');
+    }
+  }
+
+  async function renderImportReview(fields) {
+    importReviewList.innerHTML = '';
+    const currentKb = await Knowledge.getKnowledgeBase();
+
+    fields.forEach((f, idx) => {
+      let existingValue = null;
+      if (f.category === 'custom') {
+        existingValue = currentKb.custom?.[f.key];
+      } else {
+        existingValue = currentKb[f.category]?.[f.key];
+      }
+
+      let warningHtml = '';
+      if (existingValue && existingValue.trim() !== '' && existingValue !== f.value) {
+        warningHtml = `
+          <div class="import-item-warning">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            Will overwrite: ${escapeHtml(existingValue)}
+          </div>
+        `;
+      }
+
+      const itemHtml = `
+        <div class="import-item">
+          <div class="import-item-header">
+            <input type="checkbox" id="import_chk_${idx}" checked data-idx="${idx}">
+            <label class="import-item-title" for="import_chk_${idx}">${f.category} / ${f.key.replace(/_/g, ' ')}</label>
+          </div>
+          <input type="text" class="field-input import-value-input" data-idx="${idx}" value="${escapeHtml(f.value)}">
+          ${warningHtml}
+        </div>
+      `;
+      
+      const div = document.createElement('div');
+      div.innerHTML = itemHtml;
+      importReviewList.appendChild(div.firstElementChild);
+    });
+
+    importLoadingState.style.display = 'none';
+    importReviewList.style.display = 'flex';
+    importActions.style.display = 'flex';
+  }
+
+  async function saveImportedData() {
+    const kb = await Knowledge.getKnowledgeBase();
+    let savedCount = 0;
+
+    importReviewList.querySelectorAll('input[type="checkbox"]:checked').forEach(chk => {
+      const idx = parseInt(chk.dataset.idx, 10);
+      const valInput = importReviewList.querySelector(`.import-value-input[data-idx="${idx}"]`);
+      if (!valInput) return;
+      
+      const field = currentImportedFields[idx];
+      const newValue = valInput.value.trim();
+      
+      if (newValue) {
+        if (field.category === 'custom') {
+          kb.custom[field.key] = newValue;
+        } else {
+          if (!kb[field.category]) kb[field.category] = {};
+          kb[field.category][field.key] = newValue;
+        }
+        savedCount++;
+      }
+    });
+
+    if (savedCount > 0) {
+      await Knowledge.saveKnowledgeBase(kb);
+      await renderKnowledgeBase();
+      await updateStats();
+      showToast(`Imported ${savedCount} fields!`, 'success');
+    }
+    
+    reviewImportModal.style.display = 'none';
+    importTextInput.value = '';
   }
 
   // ─── Smart Fill Flow ───
@@ -663,6 +805,21 @@
         showToast('Learned mappings cleared');
       }
     });
+
+    // Import Text Flow
+    if (importTextBtn) {
+      importTextBtn.addEventListener('click', () => {
+        handleImportText(importTextInput.value);
+      });
+    }
+    if (cancelImportBtn) {
+      cancelImportBtn.addEventListener('click', () => {
+        reviewImportModal.style.display = 'none';
+      });
+    }
+    if (saveImportBtn) {
+      saveImportBtn.addEventListener('click', saveImportedData);
+    }
 
     // Legacy Profiles
     profileSelect.addEventListener('change', async (e) => {

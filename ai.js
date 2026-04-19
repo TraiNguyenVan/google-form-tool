@@ -216,9 +216,112 @@ Return ONLY valid JSON array, no markdown, no explanation:
     return fields.map(f => resolved.find(r => r.label === f.label && r.index === f.index) || f);
   }
 
+  /**
+   * Extract personal data fields from unstructured text.
+   *
+   * @param {string} text - The unstructured text
+   * @param {Array} availableFields - [{mapping, label, category}]
+   * @param {string} apiKey
+   * @returns {Array} [{category, key, value}]
+   */
+  async function extractKnowledgeFromText(text, availableFields, apiKey) {
+    if (!apiKey) throw new Error('Gemini API key is required');
+    if (!text || text.trim().length === 0) return [];
+
+    // Truncate text to a reasonable limit to avoid massive token usage
+    const safeText = text.length > 8000 ? text.substring(0, 8000) : text;
+
+    const fieldList = availableFields
+      .map(f => `  - ${f.mapping} (${f.label})`)
+      .join('\n');
+
+    const prompt = `You are a personal data extractor. Extract structured information from the following text and map it to the provided data fields.
+
+Available personal data fields (format: category.field):
+${fieldList}
+
+Text to extract from:
+"""
+${safeText}
+"""
+
+Rules:
+- Extract any personal data (name, email, phone, education, work history, links, etc.).
+- Try to map extracted data to the provided "Available personal data fields". 
+- If the text contains data that doesn't match an available field, create a new mapping using the format "custom.{descriptive_key}" (e.g., custom.favorite_color).
+- Ensure the extracted "value" is concise and accurate.
+- If no personal data is found, return an empty array [].
+
+Return ONLY a valid JSON array, no markdown, no explanations:
+[{"category": "contact", "key": "email", "value": "john@example.com"}, {"category": "custom", "key": "certifications", "value": "AWS Certified"}]`;
+
+    const body = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 2048,
+        responseMimeType: 'application/json'
+      }
+    };
+
+    try {
+      const response = await fetch(API_URL(apiKey), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        if (response.status === 429) {
+          throw new Error('Rate limit reached. Please wait a moment and try again.');
+        }
+        throw new Error(err.error?.message || `API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!responseText) throw new Error('Empty response from AI');
+
+      let results;
+      try {
+        const cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        results = JSON.parse(cleaned);
+      } catch (e) {
+        throw new Error('Failed to parse AI response');
+      }
+
+      if (!Array.isArray(results)) throw new Error('AI response is not an array');
+      
+      // Clean up the results
+      return results.map(r => {
+        let cat = r.category || 'custom';
+        let k = r.key || 'unknown';
+        
+        if (r.mapping && !r.category && !r.key) {
+           const parts = r.mapping.split('.');
+           cat = parts[0];
+           k = parts.slice(1).join('.');
+        }
+        
+        return {
+          category: cat.toLowerCase(),
+          key: k.toLowerCase().replace(/\s+/g, '_'),
+          value: r.value || ''
+        };
+      }).filter(r => r.value && r.value.toString().trim() !== '');
+
+    } catch (err) {
+      console.error('[FormFill Pro] AI extraction error:', err);
+      throw err;
+    }
+  }
+
   // ─── Public API ───
   return {
     classifyFields,
+    extractKnowledgeFromText,
     testApiKey,
     smartResolve
   };

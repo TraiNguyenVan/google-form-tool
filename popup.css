@@ -232,6 +232,27 @@ body {
 }
 @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
+.scanning-spinner { animation: spin 1.5s linear infinite; }
+
+/* Import Modal Styles */
+.import-item {
+  display: flex; flex-direction: column; gap: 4px; padding: 8px 10px;
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+.import-item-header {
+  display: flex; align-items: center; gap: 6px;
+}
+.import-item-header input[type="checkbox"] {
+  accent-color: var(--accent-purple); cursor: pointer;
+}
+.import-item-title {
+  flex: 1; font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: capitalize;
+}
+.import-item-warning {
+  color: var(--accent-amber); font-size: 10px; display: flex; align-items: center; gap: 4px;
+}
+
 /* ═══════════════════════════════════════════════════════════
    SIDE PANEL MODE
    When opened as a side panel, the body has class "sidepanel".

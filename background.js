@@ -13,6 +13,13 @@ chrome.runtime.onInstalled.addListener((details) => {
         showNotifications: true
       }
     });
+    
+    chrome.contextMenus.create({
+      id: "formfill-import",
+      title: "Import to Knowledge Base",
+      contexts: ["selection"]
+    });
+    
     console.log('FormFill Pro installed — default storage initialized.');
   }
 
@@ -27,6 +34,20 @@ chrome.action.onClicked.addListener(async (tab) => {
     await chrome.sidePanel.open({ tabId: tab.id });
   } catch (err) {
     console.error('Failed to open side panel:', err);
+  }
+});
+
+// Handle context menu clicks
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === 'formfill-import' && info.selectionText) {
+    try {
+      // Save text to storage so the side panel can pick it up
+      await chrome.storage.local.set({ pendingImportText: info.selectionText });
+      // Open side panel
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+    } catch (err) {
+      console.error('Failed to handle context menu:', err);
+    }
   }
 });
 
