@@ -91,21 +91,6 @@
         if (changeInfo.url || changeInfo.status === 'complete') checkActiveTab();
       });
     }
-
-    // Check for pending import text from background script
-    const data = await chrome.storage.local.get(['pendingImportText']);
-    if (data.pendingImportText) {
-      await chrome.storage.local.remove('pendingImportText');
-      handleImportText(data.pendingImportText);
-    }
-
-    // Listen for storage changes if side panel is already open when context menu is clicked
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes.pendingImportText && changes.pendingImportText.newValue) {
-        chrome.storage.local.remove('pendingImportText');
-        handleImportText(changes.pendingImportText.newValue);
-      }
-    });
   }
 
   // ─── Tab Navigation ───
@@ -265,6 +250,7 @@
     if (!text || !text.trim()) return;
     
     switchTab('mydata');
+    importTextInput.value = text;
     
     const apiKey = await Knowledge.getApiKey();
     if (!apiKey) {
