@@ -1,6 +1,10 @@
 # FormFill Pro — Google Form Auto-Fill
 
 <p align="center">
+  <img src="icons/icon128.png" alt="FormFill Pro" width="96">
+</p>
+
+<p align="center">
   <strong>🛟 Your survival kit for the Google Form hellscape of Vietnamese university life.</strong>
 </p>
 
