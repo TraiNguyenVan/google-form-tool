@@ -37,6 +37,9 @@
   const apiKeyInput = $('#apiKeyInput');
   const testApiBtn = $('#testApiBtn');
   const saveKbBtn = $('#saveKbBtn');
+  const exportKbBtn = $('#exportKbBtn');
+  const importKbBtn = $('#importKbBtn');
+  const importKbFile = $('#importKbFile');
   const kbEditor = $('#kbEditor');
   const customFieldsContainer = $('#customFields');
   const addCustomBtn = $('#addCustomBtn');
@@ -235,6 +238,78 @@
     await renderKnowledgeBase(); // refresh counts
     await updateStats();
     showToast('Knowledge Base saved', 'success');
+  }
+
+  async function exportKnowledgeBase() {
+    try {
+      const kb = await Knowledge.getKnowledgeBase();
+      const jsonString = JSON.stringify(kb, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `formfill_knowledge_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Knowledge Base exported successfully', 'success');
+    } catch (err) {
+      console.error('[FormFill Pro] Export error:', err);
+      showToast('Failed to export Knowledge Base', 'error');
+    }
+  }
+
+  async function importKnowledgeBase(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const importedKb = JSON.parse(e.target.result);
+        
+        if (typeof importedKb !== 'object' || importedKb === null) {
+          throw new Error('Invalid JSON format');
+        }
+        
+        const currentKb = await Knowledge.getKnowledgeBase();
+        
+        // Merge standard categories and custom fields safely
+        let importedCount = 0;
+        for (const cat of Object.keys(Knowledge.DEFAULT_KB)) {
+          if (importedKb[cat] && typeof importedKb[cat] === 'object') {
+            if (cat === 'custom') {
+              for (const [key, value] of Object.entries(importedKb.custom)) {
+                if (currentKb.custom[key] !== String(value)) {
+                  currentKb.custom[key] = String(value);
+                  importedCount++;
+                }
+              }
+            } else {
+              for (const field of Object.keys(Knowledge.DEFAULT_KB[cat])) {
+                if (importedKb[cat][field] !== undefined && currentKb[cat][field] !== String(importedKb[cat][field])) {
+                  currentKb[cat][field] = String(importedKb[cat][field]);
+                  importedCount++;
+                }
+              }
+            }
+          }
+        }
+        
+        await Knowledge.saveKnowledgeBase(currentKb);
+        await renderKnowledgeBase();
+        await updateStats();
+        
+        if (importedCount > 0) {
+          showToast(`Imported ${importedCount} values successfully`, 'success');
+        } else {
+          showToast('No new values to import', 'info');
+        }
+      } catch (err) {
+        console.error('[FormFill Pro] Import error:', err);
+        showToast('Failed to import: ' + err.message, 'error');
+      }
+    };
+    reader.readAsText(file);
   }
 
   async function updateStats() {
@@ -760,6 +835,23 @@
     });
 
     saveKbBtn.addEventListener('click', saveKnowledgeBaseUI);
+
+    if (exportKbBtn) {
+      exportKbBtn.addEventListener('click', exportKnowledgeBase);
+    }
+
+    if (importKbBtn && importKbFile) {
+      importKbBtn.addEventListener('click', () => {
+        importKbFile.click();
+      });
+      importKbFile.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          importKnowledgeBase(file);
+          importKbFile.value = '';
+        }
+      });
+    }
 
     addCustomBtn.addEventListener('click', () => {
       customFieldModal.style.display = 'flex';
